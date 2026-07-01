@@ -117,3 +117,45 @@ go test -bench . -benchmem ./benchmarks
 - **HFT Trading Engines**: Web or TCP gateway processes handling JSON/FIX protocols can write directly to the core matching engine, decoupling I/O from computation.
 - **Gateway/Engine Architecture**: Decouple slow, blocking I/O (WebSockets, HTTP) into a separate process, isolating your core business logic engine from network failures, DDoS, or GC pauses of the web server.
 - **Hot-Reloading Modules**: Update components of your system on the fly by spawning a new process and redirecting the IPC ring buffer to it without stopping the main application.
+
+## Kubernetes Deployment (Sidecar Pattern)
+
+Using `hft-ipc` in Kubernetes is highly effective when applying the **Sidecar Pattern**. Since `mmap` requires shared physical/virtual memory, you must run the communicating processes within the same **Pod** and share an in-memory volume.
+
+To achieve maximum HFT-level speed and avoid disk I/O bottlenecks, mount an `emptyDir` volume with `medium: Memory` (which maps to Linux `tmpfs` / `/dev/shm`).
+
+### Example YAML Manifest
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hft-trading-node
+spec:
+  # Create a shared memory volume (RAM-backed tmpfs)
+  volumes:
+  - name: shared-memory-vol
+    emptyDir:
+      medium: Memory  # CRITICAL: Ensures files are kept in RAM, not on disk
+      sizeLimit: 1Gi  # Optional: limit memory usage
+
+  containers:
+  # 1. Main Orchestrator / Trading Engine
+  - name: orchestrator
+    image: my-registry/orchestrator:v1.0.0
+    volumeMounts:
+    - name: shared-memory-vol
+      mountPath: /app/channels # Directory where ring buffers are stored
+
+  # 2. Sidecar Parser (e.g. JSON WebSockets)
+  - name: json-parser
+    image: my-registry/json-parser:v1.0.0
+    volumeMounts:
+    - name: shared-memory-vol
+      mountPath: /app/channels # It will create /app/channels/json_parser.bin here
+```
+
+**Benefits of this architecture in K8s:**
+1. **Zero Network Overhead:** Communication happens at tens of millions of TPS without ever touching the Kubernetes network stack (CNI, iptables, kube-proxy).
+2. **Fault Isolation:** If the `json-parser` sidecar crashes or OOMs, the `orchestrator` continues to run uninterrupted. Kubelet will simply restart the parser container, and it will instantly reconnect via the shared memory file.
+3. **Security:** No need to open ports or use privileged `hostIPC` flags. Everything is safely encapsulated within the Pod.
