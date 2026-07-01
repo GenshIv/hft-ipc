@@ -8,6 +8,7 @@
 - **Lock-Free Ring Buffer**: Uses pure Go `sync/atomic` operations. No mutexes, no channels, no blocking.
 - **Cache-Line Padding**: Core structures are padded to 64 bytes (`CacheLineSize`) to prevent False Sharing across CPU cores.
 - **Extreme Throughput**: Capable of processing up to **~18,000,000 transactions per second** on standard hardware (as measured in local benchmarks).
+- **Cross-Platform**: Works natively on Linux, Windows, and macOS. Develop locally on Windows/macOS and deploy to Linux production with zero code changes.
 
 ## Architecture
 
@@ -97,6 +98,22 @@ The `samples/` directory contains realistic usage patterns:
 3. **Hot-Swappable Plugin System** (`samples/plugin_system`): Two-way, process-level modularity using dual SPSC buffers.
 4. **Dynamic Orchestrator** (`samples/price_parser`): A Multi-Producer, Single-Consumer (MPSC) architecture where multiple independent parsers (`csv_parser`, `json_parser`) write to their own channels, and a central Orchestrator dynamically discovers and polls them without Mutex locks or restarts.
 
+```text
+    [Server 1]            [Server 2]            [Server 3]
+  +------------+        +------------+        +------------+
+  | Parser 1   |        | Parser 3   |        | Parser 5   |
+  | Parser 2   |        | Parser 4   |        | Parser 6   |
+  |     |      |        |     |      |        |     |      |
+  |     v      |        |     v      |        |     v      |
+  |Orchestrator|        |Orchestrator|        |Orchestrator|
+  +------------+        +------------+        +------------+
+        |                     |                     |
+        \---------------------+---------------------/
+                              |
+                              v
+                         [Database]
+```
+
 See `samples/README.md` for run instructions.
 
 ## Benchmarks
@@ -108,8 +125,8 @@ go test -bench . -benchmem ./benchmarks
 
 **Results (AMD Ryzen 9 7950X3D):**
 - **Data Packing (CSV/JSON):** ~7.2 ns/op
-- **Delivery 1-to-1:** ~53.8 ns/op (~18.5 million TPS)
-- **Delivery 3-to-1 (Orchestrator):** ~43.0 ns/message (129 ns per 3-source cycle)
+- **Delivery 1-to-1:** ~56.3 ns/op (~17.5 million TPS)
+- **Delivery 3-to-1 (Orchestrator):** ~51.8 ns/message (155.6 ns per 3-source cycle)
 
 *Note: The orchestrator pattern achieves higher efficiency (43ns vs 54ns) because the fast-polling loop multiplexes data sources, practically eliminating CPU spin-wait starvation.*
 
