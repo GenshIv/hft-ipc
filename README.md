@@ -118,6 +118,34 @@ go test -bench . -benchmem ./benchmarks
 - **Gateway/Engine Architecture**: Decouple slow, blocking I/O (WebSockets, HTTP) into a separate process, isolating your core business logic engine from network failures, DDoS, or GC pauses of the web server.
 - **Hot-Reloading Modules**: Update components of your system on the fly by spawning a new process and redirecting the IPC ring buffer to it without stopping the main application.
 
+## Crash Resilience & Guaranteed Delivery
+
+`hft-ipc` provides robust protection against process crashes. Because the `Head`, `Tail`, and data payload are stored directly in the `mmap` file (outside the process heap), a crashing Consumer (e.g., an OOM kill) does **not** corrupt the buffer or lose unread data. When the Consumer restarts, it re-maps the file, automatically picks up the old `Tail` pointer, and resumes reading exactly where it left off.
+
+You have two choices for reading data, depending on your strictness requirements:
+
+### 1. Maximum Speed (At-Most-Once)
+Using `Pop()` reads the data and *immediately* advances the `Tail` pointer. If your process crashes immediately after `Pop()` but before processing the data, that single message is lost.
+```go
+if rb.Pop(mapped, payload) {
+    process(payload) 
+}
+```
+
+### 2. Guaranteed Delivery (At-Least-Once)
+To guarantee zero message loss, use the `Peek()` and `Ack()` pattern. `Peek()` reads the data without moving the `Tail`. Only after your business logic successfully processes the data (e.g., saves to a DB) do you call `Ack()` to mark it as consumed.
+```go
+if rb.Peek(mapped, payload) {
+    // 1. Read data and execute complex logic
+    err := saveToDatabase(payload)
+    
+    // 2. Only advance Tail if successful
+    if err == nil {
+        rb.Ack()
+    }
+}
+```
+
 ## Kubernetes Deployment (Sidecar Pattern)
 
 Using `hft-ipc` in Kubernetes is highly effective when applying the **Sidecar Pattern**. Since `mmap` requires shared physical/virtual memory, you must run the communicating processes within the same **Pod** and share an in-memory volume.

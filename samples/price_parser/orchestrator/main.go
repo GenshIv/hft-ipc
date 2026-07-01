@@ -108,8 +108,14 @@ loop:
 
 			// Poll all known channels
 			for _, ch := range currentChannels {
-				if ch.RingBuf.Pop(ch.Map, payload) {
+				if ch.RingBuf.Peek(ch.Map, payload) {
+					// 1. Process the data (e.g. save to DB, analyze)
 					processPayload(payload, priceDB, &updatesCount, &totalReceived, ch.Name)
+					
+					// 2. Acknowledge the message (advance Tail). 
+					// If orchestrator crashes before this line, the message is NOT lost!
+					ch.RingBuf.Ack()
+					
 					processedAny = true
 				}
 			}

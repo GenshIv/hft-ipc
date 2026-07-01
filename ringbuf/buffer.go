@@ -102,3 +102,33 @@ func (rb *RingBuffer) Pop(mapped []byte, payloadOut []byte) bool {
 	
 	return true
 }
+
+// Peek tries to read a payload from the buffer without advancing the tail.
+// Returns false if empty. Use Ack() to advance the tail after successful processing.
+func (rb *RingBuffer) Peek(mapped []byte, payloadOut []byte) bool {
+	head := atomic.LoadUint64(&rb.Head)
+	tail := atomic.LoadUint64(&rb.Tail)
+	cap := atomic.LoadUint64(&rb.Capacity)
+
+	// If the buffer is empty, we can't read.
+	if head == tail {
+		return false
+	}
+
+	// Calculate index
+	idx := tail % cap
+	
+	// Calculate memory offset
+	offset := DataOffset + uintptr(idx*PayloadSize)
+	
+	// Copy from mapped memory to output
+	copy(payloadOut, mapped[offset:offset+PayloadSize])
+	
+	return true
+}
+
+// Ack advances the tail, marking the message previously read by Peek as processed.
+// This implements At-Least-Once delivery semantics.
+func (rb *RingBuffer) Ack() {
+	atomic.AddUint64(&rb.Tail, 1)
+}
