@@ -9,8 +9,8 @@ const (
 	// CacheLineSize is typically 64 bytes on x86-64 and modern ARM.
 	CacheLineSize = 64
 	
-	// PayloadSize we will just use a fixed 32 bytes for the payload
-	PayloadSize = 32
+	// PayloadSize we will use 512 bytes for the payload to simulate log messages
+	PayloadSize = 512
 )
 
 // padding to avoid false sharing between producers and consumers.

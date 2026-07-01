@@ -76,7 +76,7 @@ for {
 
 ## Running the Examples
 
-The repository includes a benchmark/demo via the `cmd` package.
+The repository includes a basic benchmark/demo via the `cmd` package.
 
 **Terminal 1 (Reader):**
 ```bash
@@ -88,7 +88,30 @@ go run ./cmd/reader/main.go
 go run ./cmd/writer/main.go
 ```
 
-You should see the writer pushing millions of transactions per second, with the reader pulling them instantly and calculating the average latency.
+## Advanced Samples
+
+The `samples/` directory contains realistic usage patterns:
+
+1. **Market Data Feed** (`samples/marketdata`): Classic low-latency binary data transfer.
+2. **High-Throughput Logger** (`samples/logger`): Offloading I/O operations from critical code paths.
+3. **Hot-Swappable Plugin System** (`samples/plugin_system`): Two-way, process-level modularity using dual SPSC buffers.
+4. **Dynamic Orchestrator** (`samples/price_parser`): A Multi-Producer, Single-Consumer (MPSC) architecture where multiple independent parsers (`csv_parser`, `json_parser`) write to their own channels, and a central Orchestrator dynamically discovers and polls them without Mutex locks or restarts.
+
+See `samples/README.md` for run instructions.
+
+## Benchmarks
+
+Run the built-in benchmarks with:
+```bash
+go test -bench . -benchmem ./benchmarks
+```
+
+**Results (AMD Ryzen 9 7950X3D):**
+- **Data Packing (CSV/JSON):** ~7.2 ns/op
+- **Delivery 1-to-1:** ~53.8 ns/op (~18.5 million TPS)
+- **Delivery 3-to-1 (Orchestrator):** ~43.0 ns/message (129 ns per 3-source cycle)
+
+*Note: The orchestrator pattern achieves higher efficiency (43ns vs 54ns) because the fast-polling loop multiplexes data sources, practically eliminating CPU spin-wait starvation.*
 
 ## Use Cases
 - **HFT Trading Engines**: Web or TCP gateway processes handling JSON/FIX protocols can write directly to the core matching engine, decoupling I/O from computation.

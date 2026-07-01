@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.test
+*.out
+*.prof
+
+# Shared Memory Files
+*.bin
+
+# Log Files
+*.log
+
+# Example Directories
+channels/
+test_channels/
