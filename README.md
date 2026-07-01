@@ -10,6 +10,12 @@
 - **Extreme Throughput**: Capable of processing up to **~18,000,000 transactions per second** on standard hardware (as measured in local benchmarks).
 - **Cross-Platform**: Works natively on Linux, Windows, and macOS. Develop locally on Windows/macOS and deploy to Linux production with zero code changes.
 
+## Installation
+
+```bash
+go get github.com/GenshIv/hft-ipc
+```
+
 ## Architecture
 
 The project is built on two primary components:
@@ -116,11 +122,28 @@ The `samples/` directory contains realistic usage patterns:
 
 See `samples/README.md` for run instructions.
 
-## Benchmarks
+## Tests & Benchmarks
 
-Run the built-in benchmarks with:
+The library is completely cross-platform. You can run tests and benchmarks natively on any supported OS.
+
+**To run unit tests:**
+```bash
+go test ./...
+```
+
+**To run benchmarks natively on your current OS:**
 ```bash
 go test -bench . -benchmem ./benchmarks
+```
+
+**To run benchmarks for a specific target OS (Cross-Compilation):**
+```bash
+# For Linux / macOS
+GOOS=linux go test -bench . -benchmem ./benchmarks
+GOOS=darwin go test -bench . -benchmem ./benchmarks
+
+# For Windows (PowerShell)
+$env:GOOS="windows"; go test -bench . -benchmem ./benchmarks
 ```
 
 **Results (AMD Ryzen 9 7950X3D):**
