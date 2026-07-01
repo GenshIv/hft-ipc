@@ -9,17 +9,17 @@ import (
 	"syscall"
 	"time"
 
-	"hft-ipc/ringbuf"
-	"hft-ipc/shm"
+	"github.com/GenshIv/hft-ipc/ringbuf"
+	"github.com/GenshIv/hft-ipc/shm"
 )
 
 func main() {
 	filePath := "hft_shared_memory.bin"
-	capacity := uint64(1000 * 1000) 
+	capacity := uint64(1000 * 1000)
 	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
-	
+
 	log.Printf("Starting reader...")
-	
+
 	mapped, file, err := shm.OpenOrCreateMmap(filePath, size)
 	if err != nil {
 		log.Fatalf("Failed to mmap: %v", err)
@@ -35,7 +35,7 @@ func main() {
 	payload := make([]byte, ringbuf.PayloadSize)
 
 	log.Println("Reader started. Waiting for transactions...")
-	
+
 	var lastTxID uint64
 	var totalLatency time.Duration
 	var count uint64
@@ -52,19 +52,19 @@ loop:
 			if rb.Pop(mapped, payload) {
 				txID := binary.LittleEndian.Uint64(payload[0:8])
 				ts := binary.LittleEndian.Uint64(payload[8:16])
-				
+
 				// Calculate latency
 				latency := time.Now().UnixNano() - int64(ts)
 				if latency > 0 {
 					totalLatency += time.Duration(latency)
 				}
-				
+
 				count++
 				lastTxID = txID
-				
+
 				// Print stats periodically
 				if count%500000 == 0 {
-					log.Printf("Read %d txs. Last ID: %d, Avg Latency: %v", 
+					log.Printf("Read %d txs. Last ID: %d, Avg Latency: %v",
 						count, lastTxID, totalLatency/time.Duration(count))
 					// Reset average
 					totalLatency = 0
@@ -76,7 +76,7 @@ loop:
 			}
 		}
 	}
-	
+
 	elapsed := time.Since(start)
 	log.Printf("Reader stopped. Alive for %v", elapsed)
 }

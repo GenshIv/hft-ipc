@@ -8,19 +8,19 @@ import (
 	"syscall"
 	"time"
 
-	"hft-ipc/ringbuf"
-	"hft-ipc/shm"
+	"github.com/GenshIv/hft-ipc/ringbuf"
+	"github.com/GenshIv/hft-ipc/shm"
 )
 
 func main() {
 	filePath := "hft_shared_memory.bin"
 	capacity := uint64(1000 * 1000) // 1 million entries
-	
+
 	// Size = header size + capacity * payload size
 	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
-	
+
 	log.Printf("Starting writer. Mmap size: %d bytes (%.2f MB)", size, float64(size)/1024/1024)
-	
+
 	mapped, file, err := shm.OpenOrCreateMmap(filePath, size)
 	if err != nil {
 		log.Fatalf("Failed to mmap: %v", err)
@@ -38,7 +38,7 @@ func main() {
 	var txID uint64 = 1
 
 	log.Println("Writer started. Writing transactions...")
-	
+
 	start := time.Now()
 	written := 0
 
@@ -62,7 +62,7 @@ loop:
 				txID++
 				written++
 			}
-			
+
 			// Small sleep so we don't completely lock up the OS in this demo.
 			// In real HFT, you might use runtime.Gosched() or an exponential backoff.
 			if written%100000 == 0 {
@@ -70,8 +70,8 @@ loop:
 			}
 		}
 	}
-	
+
 	elapsed := time.Since(start)
-	log.Printf("Writer stopped. Wrote %d transactions in %v (%.2f tx/sec)", 
+	log.Printf("Writer stopped. Wrote %d transactions in %v (%.2f tx/sec)",
 		written, elapsed, float64(written)/elapsed.Seconds())
 }
