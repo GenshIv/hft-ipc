@@ -187,3 +187,11 @@ spec:
 1. **Zero Network Overhead:** Communication happens at tens of millions of TPS without ever touching the Kubernetes network stack (CNI, iptables, kube-proxy).
 2. **Fault Isolation:** If the `json-parser` sidecar crashes or OOMs, the `orchestrator` continues to run uninterrupted. Kubelet will simply restart the parser container, and it will instantly reconnect via the shared memory file.
 3. **Security:** No need to open ports or use privileged `hostIPC` flags. Everything is safely encapsulated within the Pod.
+
+## Security Architecture
+
+IPC via shared memory (`mmap`) provides an incredibly strong security posture compared to traditional network-based microservices:
+
+1. **Zero Network Attack Surface**: `hft-ipc` opens absolutely NO network ports (TCP/UDP). It is immune to port scanning, network DDoS, packet sniffing, Man-in-the-Middle (MitM), and SSRF attacks.
+2. **Strict OS-Level Permissions**: By default, `hft-ipc` creates memory-mapped files using `0600` permissions. This means that only the OS user (Owner) who started the process can read or write the data. If an attacker breaches another service on the same server under a different user (e.g., `www-data`), they will get a `Permission Denied` error when trying to access the ring buffer.
+3. **Container Isolation (Kubernetes)**: When using the Sidecar pattern with an `emptyDir` volume, the shared memory is physically accessible *only* to the containers within that specific Pod. Other Pods in the same cluster or even on the same Node cannot access it.
