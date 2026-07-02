@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/edsrzf/mmap-go"
 	"github.com/GenshIv/hft-ipc/ringbuf"
 	"github.com/GenshIv/hft-ipc/shm"
+	"github.com/edsrzf/mmap-go"
 )
 
 type ActiveChannel struct {
@@ -27,7 +27,7 @@ type ActiveChannel struct {
 
 func main() {
 	log.Println("Starting Dynamic Orchestrator...")
-	
+
 	// Ensure channels directory exists
 	channelsDir := "channels"
 	os.MkdirAll(channelsDir, 0755)
@@ -42,7 +42,7 @@ func main() {
 	// Background routine to discover new channels (Directory Scanner)
 	go func() {
 		knownFiles := make(map[string]bool)
-		
+
 		for {
 			files, err := os.ReadDir(channelsDir)
 			if err == nil {
@@ -50,33 +50,33 @@ func main() {
 					if f.IsDir() || filepath.Ext(f.Name()) != ".bin" {
 						continue
 					}
-					
+
 					fullPath := filepath.Join(channelsDir, f.Name())
 					if !knownFiles[fullPath] {
 						// Found a new channel!
 						capacity := uint64(50 * 1000)
-						size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
-						
+						size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+
 						m, file, err := shm.OpenOrCreateMmap(fullPath, size)
 						if err != nil {
 							log.Printf("Failed to map new channel %s: %v", fullPath, err)
 							continue
 						}
-						
-						rb := ringbuf.Init(m, capacity)
-						
+
+						rb := ringbuf.Init(m, capacity, ringbuf.DefaultPayloadSize)
+
 						ch := &ActiveChannel{
 							Name:    f.Name(),
 							File:    file,
 							Map:     m,
 							RingBuf: rb,
 						}
-						
+
 						// Add to atomic list
 						oldSlice := channels.Load().([]*ActiveChannel)
 						newSlice := append(oldSlice, ch)
 						channels.Store(newSlice)
-						
+
 						knownFiles[fullPath] = true
 						log.Printf("Orchestrator: Discovered and connected to %s", f.Name())
 					}
@@ -86,8 +86,8 @@ func main() {
 		}
 	}()
 
-	payload := make([]byte, ringbuf.PayloadSize)
-	
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
+
 	// Database mockup
 	priceDB := make(map[string]float64)
 	updatesCount := 0
@@ -102,7 +102,7 @@ loop:
 			break loop
 		default:
 			processedAny := false
-			
+
 			// Load current channels atomically (very fast)
 			currentChannels := channels.Load().([]*ActiveChannel)
 
@@ -111,11 +111,11 @@ loop:
 				if ch.RingBuf.Peek(ch.Map, payload) {
 					// 1. Process the data (e.g. save to DB, analyze)
 					processPayload(payload, priceDB, &updatesCount, &totalReceived, ch.Name)
-					
-					// 2. Acknowledge the message (advance Tail). 
+
+					// 2. Acknowledge the message (advance Tail).
 					// If orchestrator crashes before this line, the message is NOT lost!
 					ch.RingBuf.Ack()
-					
+
 					processedAny = true
 				}
 			}
@@ -125,20 +125,20 @@ loop:
 			}
 		}
 	}
-	
+
 	// Cleanup
 	currentChannels := channels.Load().([]*ActiveChannel)
 	for _, ch := range currentChannels {
 		ch.Map.Unmap()
 		ch.File.Close()
 	}
-	
+
 	log.Printf("Orchestrator stopped. Received: %d, DB Updates: %d", totalReceived, updatesCount)
 }
 
 func processPayload(payload []byte, db map[string]float64, updates *int, received *int, channelName string) {
 	*received++
-	
+
 	// Parse SKU (trim null bytes)
 	skuBytes := payload[0:32]
 	idx := bytes.IndexByte(skuBytes, 0)
@@ -146,10 +146,10 @@ func processPayload(payload []byte, db map[string]float64, updates *int, receive
 		idx = 32
 	}
 	sku := string(skuBytes[:idx])
-	
+
 	// Parse Price
 	price := math.Float64frombits(binary.LittleEndian.Uint64(payload[32:40]))
-	
+
 	// Parse Source
 	source := "Unknown"
 	if payload[40] == 0x01 {
@@ -163,7 +163,7 @@ func processPayload(payload []byte, db map[string]float64, updates *int, receive
 	if !exists || math.Abs(oldPrice-price) > 0.001 {
 		db[sku] = price
 		*updates++
-		
+
 		if *updates%10000 == 0 {
 			log.Printf("[DB UPDATE] %s | Channel: %s | Source: %s | Price changed: %.2f -> %.2f", sku, channelName, source, oldPrice, price)
 		}

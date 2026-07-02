@@ -1,134 +1,148 @@
 package ringbuf
 
 import (
+	"encoding/binary"
 	"sync/atomic"
 	"unsafe"
 )
 
 const (
-	// CacheLineSize is typically 64 bytes on x86-64 and modern ARM.
 	CacheLineSize = 64
-	
-	// PayloadSize we will use 512 bytes for the payload to simulate log messages
-	PayloadSize = 512
+	// SkipMarker is written as the length when there is not enough space at the end of the buffer.
+	// This instructs consumers to wrap around to physical offset 0.
+	SkipMarker = 0xFFFFFFFF
 )
 
-// padding to avoid false sharing between producers and consumers.
 type padding [CacheLineSize - 8]byte
 
-// RingBuffer structure mapped directly to memory.
-// It uses atomic operations to update Head and Tail.
+// RingBuffer implements a tightly packed lock-free byte queue.
+// It supports a Single Producer and Multiple Consumers (SPMC).
 type RingBuffer struct {
-	// Head is written by the producer, read by the consumer.
-	Head uint64
-	_    padding // Prevents False Sharing
+	// WriteOffset is the virtual byte offset where the next write will occur.
+	WriteOffset uint64
+	_           padding
 
-	// Tail is written by the consumer, read by the producer.
-	Tail uint64
-	_    padding // Prevents False Sharing
+	// ReadOffset is the virtual byte offset where the next read will occur.
+	// Workers compete using CAS on this offset to grab chunks.
+	ReadOffset uint64
+	_          padding
 
-	// Capacity of the ring buffer
+	// Capacity of the buffer in bytes (excluding header).
 	Capacity uint64
 	_        padding
-
-	// The actual data starts immediately after this struct in memory.
 }
 
-// DataOffset is where the array of items begins in the mmap.
+// DataOffset is where the byte stream begins in the mmap.
 var DataOffset = unsafe.Sizeof(RingBuffer{})
 
-// Init initializes the RingBuffer metadata in the mapped memory.
-func Init(mapped []byte, capacity uint64) *RingBuffer {
-	// Cast the beginning of the mapped memory to *RingBuffer
+// Init initializes the RingBuffer metadata.
+// capacityBytes is the physical size of the data region.
+func Init(mapped []byte, capacityBytes uint64) *RingBuffer {
 	rb := (*RingBuffer)(unsafe.Pointer(&mapped[0]))
-	
-	// Only initialize if capacity is not set (first time file is created)
 	if atomic.LoadUint64(&rb.Capacity) == 0 {
-		atomic.StoreUint64(&rb.Capacity, capacity)
-		atomic.StoreUint64(&rb.Head, 0)
-		atomic.StoreUint64(&rb.Tail, 0)
+		atomic.StoreUint64(&rb.Capacity, capacityBytes)
+		atomic.StoreUint64(&rb.WriteOffset, 0)
+		atomic.StoreUint64(&rb.ReadOffset, 0)
 	}
 	return rb
 }
 
-// Push tries to write a payload to the buffer. Returns false if full.
+// Push writes a variable-length payload to the byte queue.
+// This is for a Single Producer.
 func (rb *RingBuffer) Push(mapped []byte, payload []byte) bool {
-	head := atomic.LoadUint64(&rb.Head)
-	tail := atomic.LoadUint64(&rb.Tail)
-	cap := atomic.LoadUint64(&rb.Capacity)
+	L := uint64(len(payload))
+	reqSize := 4 + L
+	capBytes := atomic.LoadUint64(&rb.Capacity)
 
-	// If the buffer is full, we can't write.
-	if head-tail >= cap {
-		return false
+	w := atomic.LoadUint64(&rb.WriteOffset)
+	r := atomic.LoadUint64(&rb.ReadOffset)
+
+	used := w - r
+	if capBytes-used < reqSize {
+		return false // Buffer full
 	}
 
-	// Calculate index
-	idx := head % cap
-	
-	// Calculate memory offset
-	offset := DataOffset + uintptr(idx*PayloadSize)
-	
-	// Copy payload directly into mapped memory (Zero-copy from perspective of Go GC!)
-	copy(mapped[offset:offset+PayloadSize], payload)
-	
-	// Atomically advance head (release barrier)
-	atomic.AddUint64(&rb.Head, 1)
-	
+	physW := w % capBytes
+
+	// Check if it fits before the wrap boundary
+	if physW+reqSize > capBytes {
+		// Doesn't fit. We need to skip the rest of the physical buffer.
+		skipBytes := capBytes - physW
+		if capBytes-used < reqSize+skipBytes {
+			return false // Buffer full (including skip space)
+		}
+
+		// Write SkipMarker if there is at least 4 bytes left for the marker
+		if skipBytes >= 4 {
+			offset := DataOffset + uintptr(physW)
+			binary.LittleEndian.PutUint32(mapped[offset:offset+4], SkipMarker)
+		}
+
+		// Advance w to next multiple of capBytes (virtual wrap)
+		w += skipBytes
+		physW = 0
+	}
+
+	// Write length
+	offset := DataOffset + uintptr(physW)
+	binary.LittleEndian.PutUint32(mapped[offset:offset+4], uint32(L))
+
+	// Write payload
+	copy(mapped[offset+4:offset+4+uintptr(L)], payload)
+
+	// Publish the write atomically
+	atomic.StoreUint64(&rb.WriteOffset, w+reqSize)
 	return true
 }
 
-// Pop tries to read a payload from the buffer. Returns false if empty.
-func (rb *RingBuffer) Pop(mapped []byte, payloadOut []byte) bool {
-	head := atomic.LoadUint64(&rb.Head)
-	tail := atomic.LoadUint64(&rb.Tail)
-	cap := atomic.LoadUint64(&rb.Capacity)
+// GrabChunk attempts to atomically read and claim the next chunk.
+// This is lock-free and perfectly safe for Multiple Consumers (Workers) running concurrently.
+// It returns a Zero-Copy byte slice pointing to mmap and a boolean indicating success.
+// If the queue is empty, returns (nil, false).
+func (rb *RingBuffer) GrabChunk(mapped []byte) ([]byte, bool) {
+	for {
+		w := atomic.LoadUint64(&rb.WriteOffset)
+		r := atomic.LoadUint64(&rb.ReadOffset)
 
-	// If the buffer is empty, we can't read.
-	if head == tail {
-		return false
+		if r >= w {
+			return nil, false // Empty
+		}
+
+		capBytes := atomic.LoadUint64(&rb.Capacity)
+		physR := r % capBytes
+
+		var skipBytes uint64
+		if capBytes-physR < 4 {
+			skipBytes = capBytes - physR
+		} else {
+			offset := DataOffset + uintptr(physR)
+			length := binary.LittleEndian.Uint32(mapped[offset : offset+4])
+			if length == SkipMarker {
+				skipBytes = capBytes - physR
+			} else {
+				// We found a valid chunk!
+				nextR := r + 4 + uint64(length)
+
+				// Safety check: chunk shouldn't exceed the published WriteOffset
+				if nextR > w {
+					return nil, false // Data not fully written yet (or corrupted)
+				}
+
+				// Try to claim this chunk with CAS
+				if atomic.CompareAndSwapUint64(&rb.ReadOffset, r, nextR) {
+					// Claimed successfully! Return zero-copy slice
+					return mapped[offset+4 : offset+4+uintptr(length)], true
+				}
+				// CAS failed (another worker grabbed it). Loop and try again.
+				continue
+			}
+		}
+
+		if skipBytes > 0 {
+			// Try to advance ReadOffset past the skip using CAS, so we don't stall.
+			// If CAS fails, someone else advanced it, we just continue.
+			atomic.CompareAndSwapUint64(&rb.ReadOffset, r, r+skipBytes)
+			continue
+		}
 	}
-
-	// Calculate index
-	idx := tail % cap
-	
-	// Calculate memory offset
-	offset := DataOffset + uintptr(idx*PayloadSize)
-	
-	// Copy from mapped memory to output
-	copy(payloadOut, mapped[offset:offset+PayloadSize])
-	
-	// Atomically advance tail
-	atomic.AddUint64(&rb.Tail, 1)
-	
-	return true
-}
-
-// Peek tries to read a payload from the buffer without advancing the tail.
-// Returns false if empty. Use Ack() to advance the tail after successful processing.
-func (rb *RingBuffer) Peek(mapped []byte, payloadOut []byte) bool {
-	head := atomic.LoadUint64(&rb.Head)
-	tail := atomic.LoadUint64(&rb.Tail)
-	cap := atomic.LoadUint64(&rb.Capacity)
-
-	// If the buffer is empty, we can't read.
-	if head == tail {
-		return false
-	}
-
-	// Calculate index
-	idx := tail % cap
-	
-	// Calculate memory offset
-	offset := DataOffset + uintptr(idx*PayloadSize)
-	
-	// Copy from mapped memory to output
-	copy(payloadOut, mapped[offset:offset+PayloadSize])
-	
-	return true
-}
-
-// Ack advances the tail, marking the message previously read by Peek as processed.
-// This implements At-Least-Once delivery semantics.
-func (rb *RingBuffer) Ack() {
-	atomic.AddUint64(&rb.Tail, 1)
 }

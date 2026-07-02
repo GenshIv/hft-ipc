@@ -13,7 +13,7 @@ import (
 
 func main() {
 	capacity := uint64(10 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 	// 1. Host -> Plugin buffer (Plugin reads from this)
 	rxMap, rxFile, err := shm.OpenOrCreateMmap("shm_host_to_plugin.bin", size)
@@ -22,7 +22,7 @@ func main() {
 	}
 	defer rxFile.Close()
 	defer rxMap.Unmap()
-	rxRb := ringbuf.Init(rxMap, capacity)
+	rxRb := ringbuf.Init(rxMap, capacity, ringbuf.DefaultPayloadSize)
 
 	// 2. Plugin -> Host buffer (Plugin writes to this)
 	txMap, txFile, err := shm.OpenOrCreateMmap("shm_plugin_to_host.bin", size)
@@ -31,15 +31,15 @@ func main() {
 	}
 	defer txFile.Close()
 	defer txMap.Unmap()
-	txRb := ringbuf.Init(txMap, capacity)
+	txRb := ringbuf.Init(txMap, capacity, ringbuf.DefaultPayloadSize)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	rxPayload := make([]byte, ringbuf.PayloadSize)
+	rxPayload := make([]byte, ringbuf.DefaultPayloadSize)
 
 	log.Println("Plugin started. Waiting for tasks...")
-	
+
 	processed := 0
 
 loop:
@@ -52,7 +52,7 @@ loop:
 			if rxRb.Pop(rxMap, rxPayload) {
 				// Process task (in a real scenario, do some work)
 				// For this sample, we just mirror it back to prove roundtrip
-				
+
 				// Push result back
 				// Spin wait until there's room in the TX buffer
 				for !txRb.Push(txMap, rxPayload) {
@@ -64,6 +64,6 @@ loop:
 			}
 		}
 	}
-	
+
 	log.Printf("Plugin stopped. Processed %d tasks.", processed)
 }

@@ -15,7 +15,7 @@ import (
 func main() {
 	filePath := "hft_logger.bin"
 	capacity := uint64(500 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 	log.Printf("Starting Logger Sink...")
 
@@ -26,12 +26,12 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity)
+	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	payload := make([]byte, ringbuf.PayloadSize)
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
 
 	outFile, err := os.OpenFile("application.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -40,7 +40,7 @@ func main() {
 	defer outFile.Close()
 
 	log.Println("Sink started. Writing to application.log...")
-	
+
 	count := 0
 	batch := make([]byte, 0, 1024*1024) // 1MB batch buffer
 
@@ -56,11 +56,11 @@ loop:
 				if idx == -1 {
 					idx = len(payload)
 				}
-				
+
 				batch = append(batch, payload[:idx]...)
 				batch = append(batch, '\n')
 				count++
-				
+
 				// Flush batch to disk if it gets large enough
 				if len(batch) > 500*1024 {
 					outFile.Write(batch)
@@ -76,11 +76,11 @@ loop:
 			}
 		}
 	}
-	
+
 	// Final flush
 	if len(batch) > 0 {
 		outFile.Write(batch)
 	}
-	
+
 	log.Printf("Sink stopped. Wrote %d logs to disk.", count)
 }

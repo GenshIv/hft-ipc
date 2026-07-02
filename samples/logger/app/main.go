@@ -14,8 +14,8 @@ import (
 
 func main() {
 	filePath := "hft_logger.bin"
-	capacity := uint64(500 * 1000) 
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+	capacity := uint64(500 * 1000)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 	log.Printf("Starting Logger App. Mmap size: %.2f MB", float64(size)/1024/1024)
 
@@ -26,15 +26,15 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity)
+	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	payload := make([]byte, ringbuf.PayloadSize)
-	
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
+
 	log.Println("App started. Emitting logs...")
-	
+
 	count := 0
 	start := time.Now()
 
@@ -45,14 +45,14 @@ loop:
 			break loop
 		default:
 			count++
-			logMessage := fmt.Sprintf(`{"time": "%s", "level": "INFO", "msg": "User login successful", "user_id": %d}`, 
+			logMessage := fmt.Sprintf(`{"time": "%s", "level": "INFO", "msg": "User login successful", "user_id": %d}`,
 				time.Now().Format(time.RFC3339Nano), count)
-			
+
 			// Clear payload (optional but good for clean strings)
 			for i := range payload {
 				payload[i] = 0
 			}
-			
+
 			// Copy string into payload
 			copy(payload, logMessage)
 
@@ -62,10 +62,10 @@ loop:
 			} else {
 				// Spin wait
 			}
-			
+
 			time.Sleep(100 * time.Microsecond)
 		}
 	}
-	
+
 	log.Printf("App stopped. Emitted %d logs in %v", count, time.Since(start))
 }
