@@ -8,14 +8,14 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/edsrzf/mmap-go"
 	"github.com/GenshIv/hft-ipc/ringbuf"
 	"github.com/GenshIv/hft-ipc/shm"
+	"github.com/edsrzf/mmap-go"
 )
 
 // BenchmarkPack_CSV measures the speed of formatting/packing mock CSV data
 func BenchmarkPack_CSV(b *testing.B) {
-	payload := make([]byte, ringbuf.PayloadSize)
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
 	sku := "LAPTOP-01"
 	price := 1000.50
 
@@ -35,7 +35,7 @@ func BenchmarkPack_CSV(b *testing.B) {
 // In our architecture, the actual data packing is the same, so speeds should be identical,
 // but in a real app, JSON unmarshaling would be measured here.
 func BenchmarkPack_JSON(b *testing.B) {
-	payload := make([]byte, ringbuf.PayloadSize)
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
 	sku := "MONITOR-27"
 	price := 250.75
 
@@ -57,7 +57,7 @@ func BenchmarkDelivery_1to1(b *testing.B) {
 	os.Remove(path) // Ensure clean
 
 	capacity := uint64(50 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 	mapped, file, err := shm.OpenOrCreateMmap(path, size)
 	if err != nil {
@@ -66,10 +66,10 @@ func BenchmarkDelivery_1to1(b *testing.B) {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity)
+	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
 
-	payloadIn := make([]byte, ringbuf.PayloadSize)
-	payloadOut := make([]byte, ringbuf.PayloadSize)
+	payloadIn := make([]byte, ringbuf.DefaultPayloadSize)
+	payloadOut := make([]byte, ringbuf.DefaultPayloadSize)
 
 	// Producer
 	go func() {
@@ -93,37 +93,37 @@ func BenchmarkDelivery_1to1(b *testing.B) {
 // BenchmarkDelivery_3to1 measures the throughput of an orchestrator reading from 3 sources
 func BenchmarkDelivery_3to1(b *testing.B) {
 	os.MkdirAll("test_channels", 0755)
-	
+
 	setupChannel := func(name string) (mmap.MMap, *ringbuf.RingBuffer, *os.File) {
 		path := filepath.Join("test_channels", name)
 		os.Remove(path)
-		
+
 		capacity := uint64(50 * 1000)
-		size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+		size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 		mapped, file, err := shm.OpenOrCreateMmap(path, size)
 		if err != nil {
 			b.Fatalf("Failed to mmap: %v", err)
 		}
 
-		rb := ringbuf.Init(mapped, capacity)
+		rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
 		return mapped, rb, file
 	}
 
 	map1, rb1, file1 := setupChannel("bench_3to1_1.bin")
 	defer file1.Close()
 	defer map1.Unmap()
-	
+
 	map2, rb2, file2 := setupChannel("bench_3to1_2.bin")
 	defer file2.Close()
 	defer map2.Unmap()
-	
+
 	map3, rb3, file3 := setupChannel("bench_3to1_3.bin")
 	defer file3.Close()
 	defer map3.Unmap()
 
-	payloadIn := make([]byte, ringbuf.PayloadSize)
-	payloadOut := make([]byte, ringbuf.PayloadSize)
+	payloadIn := make([]byte, ringbuf.DefaultPayloadSize)
+	payloadOut := make([]byte, ringbuf.DefaultPayloadSize)
 
 	// Producers
 	producer := func(rb *ringbuf.RingBuffer, mapped []byte) {
@@ -143,7 +143,7 @@ func BenchmarkDelivery_3to1(b *testing.B) {
 	// Consumer (Orchestrator)
 	total := b.N * 3
 	count := 0
-	
+
 	for count < total {
 		processedAny := false
 		if rb1.Pop(map1, payloadOut) {
@@ -158,7 +158,7 @@ func BenchmarkDelivery_3to1(b *testing.B) {
 			count++
 			processedAny = true
 		}
-		
+
 		if !processedAny {
 			runtime.Gosched()
 		}

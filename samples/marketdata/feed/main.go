@@ -16,7 +16,7 @@ import (
 func main() {
 	filePath := "hft_marketdata.bin"
 	capacity := uint64(100 * 1000) // 100k
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
 
 	log.Printf("Starting Market Data Feed. Mmap size: %.2f MB", float64(size)/1024/1024)
 
@@ -27,12 +27,12 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity)
+	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	payload := make([]byte, ringbuf.PayloadSize)
+	payload := make([]byte, ringbuf.DefaultPayloadSize)
 
 	symbols := []string{"BTC/USD ", "ETH/USD ", "SOL/USD ", "DOGE/USD"}
 	var symbolBytes [4][8]byte
@@ -41,9 +41,9 @@ func main() {
 	}
 
 	prices := []float64{65000.50, 3500.25, 150.10, 0.15}
-	
+
 	log.Println("Feed started. Generating ticks...")
-	
+
 	count := 0
 	start := time.Now()
 
@@ -54,10 +54,10 @@ loop:
 			break loop
 		default:
 			symIdx := count % len(symbols)
-			
+
 			// Simulate price movement
 			prices[symIdx] += (float64(count%3) - 1.0) * 0.1
-			
+
 			// Pack data: [8 bytes Symbol] [8 bytes Price] [4 bytes Volume]
 			copy(payload[0:8], symbolBytes[symIdx][:])
 			binary.LittleEndian.PutUint64(payload[8:16], math.Float64bits(prices[symIdx]))
@@ -67,11 +67,11 @@ loop:
 			if rb.Push(mapped, payload) {
 				count++
 			}
-			
+
 			// Throttling just a little bit so we can actually read the output in the consumer
 			time.Sleep(10 * time.Microsecond)
 		}
 	}
-	
+
 	log.Printf("Feed stopped. Sent %d ticks in %v", count, time.Since(start))
 }
