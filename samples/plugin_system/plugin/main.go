@@ -13,7 +13,7 @@ import (
 
 func main() {
 	capacity := uint64(10 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 	// 1. Host -> Plugin buffer (Plugin reads from this)
 	rxMap, rxFile, err := shm.OpenOrCreateMmap("shm_host_to_plugin.bin", size)
@@ -22,7 +22,7 @@ func main() {
 	}
 	defer rxFile.Close()
 	defer rxMap.Unmap()
-	rxRb := ringbuf.Init(rxMap, capacity, ringbuf.DefaultPayloadSize)
+	rxRb := ringbuf.Init(rxMap, capacity)
 
 	// 2. Plugin -> Host buffer (Plugin writes to this)
 	txMap, txFile, err := shm.OpenOrCreateMmap("shm_plugin_to_host.bin", size)
@@ -31,12 +31,12 @@ func main() {
 	}
 	defer txFile.Close()
 	defer txMap.Unmap()
-	txRb := ringbuf.Init(txMap, capacity, ringbuf.DefaultPayloadSize)
+	txRb := ringbuf.Init(txMap, capacity)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	rxPayload := make([]byte, ringbuf.DefaultPayloadSize)
+	rxPayload := make([]byte, ringbuf.PayloadSize)
 
 	log.Println("Plugin started. Waiting for tasks...")
 

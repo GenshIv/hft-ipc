@@ -15,7 +15,7 @@ import (
 
 // BenchmarkPack_CSV measures the speed of formatting/packing mock CSV data
 func BenchmarkPack_CSV(b *testing.B) {
-	payload := make([]byte, ringbuf.DefaultPayloadSize)
+	payload := make([]byte, ringbuf.PayloadSize)
 	sku := "LAPTOP-01"
 	price := 1000.50
 
@@ -35,7 +35,7 @@ func BenchmarkPack_CSV(b *testing.B) {
 // In our architecture, the actual data packing is the same, so speeds should be identical,
 // but in a real app, JSON unmarshaling would be measured here.
 func BenchmarkPack_JSON(b *testing.B) {
-	payload := make([]byte, ringbuf.DefaultPayloadSize)
+	payload := make([]byte, ringbuf.PayloadSize)
 	sku := "MONITOR-27"
 	price := 250.75
 
@@ -57,7 +57,7 @@ func BenchmarkDelivery_1to1(b *testing.B) {
 	os.Remove(path) // Ensure clean
 
 	capacity := uint64(50 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 	mapped, file, err := shm.OpenOrCreateMmap(path, size)
 	if err != nil {
@@ -66,10 +66,10 @@ func BenchmarkDelivery_1to1(b *testing.B) {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
+	rb := ringbuf.Init(mapped, capacity)
 
-	payloadIn := make([]byte, ringbuf.DefaultPayloadSize)
-	payloadOut := make([]byte, ringbuf.DefaultPayloadSize)
+	payloadIn := make([]byte, ringbuf.PayloadSize)
+	payloadOut := make([]byte, ringbuf.PayloadSize)
 
 	// Producer
 	go func() {
@@ -99,14 +99,14 @@ func BenchmarkDelivery_3to1(b *testing.B) {
 		os.Remove(path)
 
 		capacity := uint64(50 * 1000)
-		size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+		size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 		mapped, file, err := shm.OpenOrCreateMmap(path, size)
 		if err != nil {
 			b.Fatalf("Failed to mmap: %v", err)
 		}
 
-		rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
+		rb := ringbuf.Init(mapped, capacity)
 		return mapped, rb, file
 	}
 
@@ -122,8 +122,8 @@ func BenchmarkDelivery_3to1(b *testing.B) {
 	defer file3.Close()
 	defer map3.Unmap()
 
-	payloadIn := make([]byte, ringbuf.DefaultPayloadSize)
-	payloadOut := make([]byte, ringbuf.DefaultPayloadSize)
+	payloadIn := make([]byte, ringbuf.PayloadSize)
+	payloadOut := make([]byte, ringbuf.PayloadSize)
 
 	// Producers
 	producer := func(rb *ringbuf.RingBuffer, mapped []byte) {

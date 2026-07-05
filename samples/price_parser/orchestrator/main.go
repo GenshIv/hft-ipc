@@ -55,7 +55,7 @@ func main() {
 					if !knownFiles[fullPath] {
 						// Found a new channel!
 						capacity := uint64(50 * 1000)
-						size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+						size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 						m, file, err := shm.OpenOrCreateMmap(fullPath, size)
 						if err != nil {
@@ -63,7 +63,7 @@ func main() {
 							continue
 						}
 
-						rb := ringbuf.Init(m, capacity, ringbuf.DefaultPayloadSize)
+						rb := ringbuf.Init(m, capacity)
 
 						ch := &ActiveChannel{
 							Name:    f.Name(),
@@ -86,7 +86,7 @@ func main() {
 		}
 	}()
 
-	payload := make([]byte, ringbuf.DefaultPayloadSize)
+	payload := make([]byte, ringbuf.PayloadSize)
 
 	// Database mockup
 	priceDB := make(map[string]float64)
