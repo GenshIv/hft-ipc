@@ -23,7 +23,7 @@ type VWAP struct {
 func main() {
 	filePath := "hft_marketdata.bin"
 	capacity := uint64(100 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 	log.Printf("Starting Market Data Algo...")
 
@@ -34,12 +34,12 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
+	rb := ringbuf.Init(mapped, capacity)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	payload := make([]byte, ringbuf.DefaultPayloadSize)
+	payload := make([]byte, ringbuf.PayloadSize)
 
 	vwapMap := make(map[string]*VWAP)
 

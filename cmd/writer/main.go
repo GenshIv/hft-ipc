@@ -14,9 +14,10 @@ import (
 
 func main() {
 	filePath := "hft_shared_memory.bin"
-	capacityBytes := uint64(1024 * 1024 * 10) // 10 MB capacity
+	capacity := uint64(1000 * 1000) // 1 million entries
 
-	size := int(ringbuf.DataOffset) + int(capacityBytes)
+	// Size = header size + capacity * payload size
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 	log.Printf("Starting writer. Mmap size: %d bytes (%.2f MB)", size, float64(size)/1024/1024)
 
@@ -27,16 +28,13 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacityBytes)
+	rb := ringbuf.Init(mapped, capacity)
 
 	// Setup graceful shutdown
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	// Vary payload size to demonstrate the continuous byte queue
-	payload1 := make([]byte, 128)
-	payload2 := make([]byte, 512)
-
+	payload := make([]byte, ringbuf.PayloadSize)
 	var txID uint64 = 1
 
 	log.Println("Writer started. Writing transactions...")
@@ -51,34 +49,22 @@ loop:
 			log.Println("Interrupt received, stopping...")
 			break loop
 		default:
-			// Prepare payload1
-			binary.LittleEndian.PutUint64(payload1[0:8], txID)
-			binary.LittleEndian.PutUint64(payload1[8:16], uint64(time.Now().UnixNano()))
-			for i := 16; i < len(payload1); i++ {
-				payload1[i] = 0xAA
+			// Prepare payload
+			binary.LittleEndian.PutUint64(payload[0:8], txID)
+			binary.LittleEndian.PutUint64(payload[8:16], uint64(time.Now().UnixNano()))
+			// Fill the rest with some dummy data
+			for i := 16; i < ringbuf.PayloadSize; i++ {
+				payload[i] = 0xFF
 			}
 
 			// Try to push. If full, spin wait.
-			for !rb.Push(mapped, payload1) {
-				// spin wait
+			if rb.Push(mapped, payload) {
+				txID++
+				written++
 			}
-			txID++
-			written++
-
-			// Prepare payload2
-			binary.LittleEndian.PutUint64(payload2[0:8], txID)
-			binary.LittleEndian.PutUint64(payload2[8:16], uint64(time.Now().UnixNano()))
-			for i := 16; i < len(payload2); i++ {
-				payload2[i] = 0xBB
-			}
-
-			for !rb.Push(mapped, payload2) {
-				// spin wait
-			}
-			txID++
-			written++
 
 			// Small sleep so we don't completely lock up the OS in this demo.
+			// In real HFT, you might use runtime.Gosched() or an exponential backoff.
 			if written%100000 == 0 {
 				time.Sleep(1 * time.Millisecond)
 			}

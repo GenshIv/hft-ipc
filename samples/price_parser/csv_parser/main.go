@@ -20,7 +20,7 @@ func main() {
 
 	filePath := "channels/csv_parser.bin"
 	capacity := uint64(50 * 1000)
-	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.DefaultPayloadSize)
+	size := int(ringbuf.DataOffset) + int(capacity*ringbuf.PayloadSize)
 
 	log.Println("Starting CSV Parser...")
 
@@ -31,12 +31,12 @@ func main() {
 	defer file.Close()
 	defer mapped.Unmap()
 
-	rb := ringbuf.Init(mapped, capacity, ringbuf.DefaultPayloadSize)
+	rb := ringbuf.Init(mapped, capacity)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	payload := make([]byte, ringbuf.DefaultPayloadSize)
+	payload := make([]byte, ringbuf.PayloadSize)
 
 	// Simulate parsing a large CSV file line by line
 	skus := []string{"LAPTOP-01", "PHONE-05", "TV-55", "MOUSE-02"}
